@@ -118,6 +118,11 @@ func (p *TransportParameters) Unmarshal(data []byte, sentBy protocol.Perspective
 		}
 	}
 
+	// check that the server sent a stateless reset token
+	if sentBy == protocol.PerspectiveServer && p.StatelessResetToken == nil {
+		return errors.New("server didn't send stateless_reset_token")
+	}
+
 	if !readAckDelayExponent {
 		p.AckDelayExponent = protocol.DefaultAckDelayExponent
 	}

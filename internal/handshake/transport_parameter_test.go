@@ -14,10 +14,19 @@ import (
 )
 
 var _ = Describe("Transport Parameters", func() {
+	var emptyToken [16]byte
+
 	prependLength := func(tp []byte) []byte {
 		data := make([]byte, 2)
 		binary.BigEndian.PutUint16(data, uint16(len(tp)))
 		return append(data, tp...)
+	}
+
+	addStatelessResetToken := func(b *bytes.Buffer) {
+		// add the stateless reset token
+		utils.BigEndian.WriteUint16(b, uint16(statelessResetTokenParameterID))
+		utils.BigEndian.WriteUint16(b, 16)
+		b.Write(emptyToken[:])
 	}
 
 	It("has a string representation", func() {
@@ -142,7 +151,11 @@ var _ = Describe("Transport Parameters", func() {
 	})
 
 	It("sets the default value for the ack_delay_exponent, when no value was sent", func() {
-		data := (&TransportParameters{AckDelayExponent: protocol.DefaultAckDelayExponent}).Marshal()
+		params := &TransportParameters{
+			AckDelayExponent:    protocol.DefaultAckDelayExponent,
+			StatelessResetToken: &emptyToken,
+		}
+		data := params.Marshal()
 		p := &TransportParameters{}
 		Expect(p.Unmarshal(data, protocol.PerspectiveServer)).To(Succeed())
 		Expect(p.AckDelayExponent).To(BeEquivalentTo(protocol.DefaultAckDelayExponent))
@@ -167,6 +180,7 @@ var _ = Describe("Transport Parameters", func() {
 		utils.BigEndian.WriteUint16(b, uint16(initialMaxStreamDataBidiLocalParameterID))
 		utils.BigEndian.WriteUint16(b, uint16(utils.VarIntLen(0x1337)))
 		utils.WriteVarInt(b, 0x1337)
+		addStatelessResetToken(b)
 		// write an unknown parameter
 		utils.BigEndian.WriteUint16(b, 0x42)
 		utils.BigEndian.WriteUint16(b, 6)
@@ -191,6 +205,7 @@ var _ = Describe("Transport Parameters", func() {
 		utils.BigEndian.WriteUint16(b, uint16(initialMaxStreamDataBidiRemoteParameterID))
 		utils.BigEndian.WriteUint16(b, uint16(utils.VarIntLen(0x42)))
 		utils.WriteVarInt(b, 0x42)
+		addStatelessResetToken(b)
 		// write first parameter again
 		utils.BigEndian.WriteUint16(b, uint16(initialMaxStreamDataBidiLocalParameterID))
 		utils.BigEndian.WriteUint16(b, uint16(utils.VarIntLen(0x1337)))
@@ -215,9 +230,19 @@ var _ = Describe("Transport Parameters", func() {
 		utils.BigEndian.WriteUint16(b, uint16(initialMaxStreamDataBidiLocalParameterID))
 		utils.BigEndian.WriteUint16(b, uint16(utils.VarIntLen(0x1337)))
 		utils.WriteVarInt(b, 0x1337)
+		addStatelessResetToken(b)
 		b.Write([]byte("foo"))
 		p := &TransportParameters{}
 		Expect(p.Unmarshal(prependLength(b.Bytes()), protocol.PerspectiveServer)).To(MatchError("should have read all data. Still have 3 bytes"))
+	})
+
+	It("errors if the server didn't send a stateless_reset_token", func() {
+		b := &bytes.Buffer{}
+		utils.BigEndian.WriteUint16(b, uint16(initialMaxStreamDataBidiLocalParameterID))
+		utils.BigEndian.WriteUint16(b, uint16(utils.VarIntLen(0x1337)))
+		utils.WriteVarInt(b, 0x1337)
+		p := &TransportParameters{}
+		Expect(p.Unmarshal(prependLength(b.Bytes()), protocol.PerspectiveServer)).To(MatchError("server didn't send stateless_reset_token"))
 	})
 
 	It("errors if the client sent a stateless_reset_token", func() {
